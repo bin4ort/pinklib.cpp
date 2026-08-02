@@ -996,12 +996,20 @@ std::string render_template(const std::string& template_name, const json& data) 
         auto env = inja::Environment{};
         env.set_throw_at_missing_includes(false);
 
+        // Inject global template variables
+        json data_with_globals = data;
+        data_with_globals["disable_indexing"] = disable_indexing();
+        data_with_globals["enable_rss"] = enable_rss();
+        data_with_globals["sfw_only"] = sfw_only();
+        data_with_globals["version"] = "0.36.0";
+        data_with_globals["git_commit"] = "cpp";
+
         std::string raw = load_raw_template(template_name);
         if (raw.empty()) return "";
 
         std::string resolved = resolve_extends(raw);
 
-        // Handle any remaining {% include "file" %} by inlining before inja
+        // Handle any remaining {% include "file" %} by inlining
         static std::regex re_include(R"(\{%\-?\s*include\s+\"([^\"]+)\"\s*\-?%\})");
         std::smatch inc;
         while (std::regex_search(resolved, inc, re_include)) {
@@ -1009,7 +1017,7 @@ std::string render_template(const std::string& template_name, const json& data) 
             resolved.replace(inc.position(), inc.length(), included);
         }
 
-        return env.render(resolved, data);
+        return env.render(resolved, data_with_globals);
     } catch (const std::exception& e) {
         return "<html><body><h1>Template Error</h1><p>" + std::string(e.what()) + "</p></body></html>";
     }
