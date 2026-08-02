@@ -1,0 +1,3 @@
+[submodule "redlib-src"]
+	path = redlib-src
+	url = https://github.com/redlib-org/redlib.git

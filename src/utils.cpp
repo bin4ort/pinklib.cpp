@@ -721,11 +721,10 @@ std::string deflate_decompress(const std::vector<uint8_t>& input) {
 }
 
 // ---- Template Rendering ----
-static std::string load_template_file(const std::string& name) {
+static std::string load_raw_template(const std::string& name) {
     const auto& tmpls = embedded_templates();
     auto it = tmpls.find(name);
     if (it != tmpls.end()) return it->second;
-    // Fallback: try filesystem
     std::string path = "templates/" + name;
     std::ifstream file(path);
     if (!file.is_open()) return "";
@@ -734,12 +733,248 @@ static std::string load_template_file(const std::string& name) {
     return buf.str();
 }
 
+// Parse macros from a template file (e.g. utils.html)
+// Returns map: macro_name → (arg_names, body)
+static std::unordered_map<std::string, std::pair<std::vector<std::string>, std::string>>
+parse_macros(const std::string& content) {
+    std::unordered_map<std::string, std::pair<std::vector<std::string>, std::string>> macros;
+    static std::regex re_macro(
+        R"(\{%\-?\s*macro\s+(\w+)\(([^)]*)\)\s*\-?%\}\s*([\s\S]*?)\{%\-?\s*endmacro\s*\-?%\})");
+    auto it = std::sregex_iterator(content.begin(), content.end(), re_macro);
+    for (; it != std::sregex_iterator(); ++it) {
+        std::string name = (*it)[1].str();
+        std::string args_str = (*it)[2].str();
+        std::string body = (*it)[3].str();
+        // Parse argument names
+        std::vector<std::string> args;
+        std::stringstream ss(args_str);
+        std::string arg;
+        while (std::getline(ss, arg, ',')) {
+            // trim whitespace
+            size_t start = arg.find_first_not_of(" \t");
+            size_t end = arg.find_last_not_of(" \t");
+            if (start != std::string::npos) arg = arg.substr(start, end - start + 1);
+            if (!arg.empty()) args.push_back(arg);
+        }
+        macros[name] = {args, body};
+    }
+    return macros;
+}
+
+// Expand {% call ns::macro_name(args...) %} within content
+static std::string expand_calls(std::string content, const std::string& ns,
+                                 const std::unordered_map<std::string,
+                                 std::pair<std::vector<std::string>, std::string>>& macros) {
+    static std::regex re_call(R"(\{%\-?\s*call\s+(\w+)::(\w+)\(([^)]*)\)\s*\-?%\})");
+    static std::regex re_call_short(R"(\{%\-?\s*call\s+(\w+)\(([^)]*)\)\s*\-?%\})");
+
+    auto expand_one = [&](const std::smatch& m) -> std::string {
+        std::string module_or_name = m[1].str();
+        std::string macro_name;
+        std::string args_str;
+
+        if (m.size() > 3) {
+            // call module::name(args)
+            macro_name = m[2].str();
+            args_str = m[3].str();
+        } else {
+            // call name(args)
+            macro_name = module_or_name;
+            args_str = m[2].str();
+        }
+
+        auto mit = macros.find(macro_name);
+        if (mit == macros.end()) return "";
+
+        const auto& [param_names, body] = mit->second;
+
+        // Parse call arguments (comma-separated, but respect nested parens)
+        std::vector<std::string> call_args;
+        int depth = 0;
+        std::string current;
+        for (char c : args_str) {
+            if (c == '(') depth++;
+            else if (c == ')') depth--;
+            if (c == ',' && depth == 0) {
+                call_args.push_back(current);
+                current.clear();
+            } else {
+                current += c;
+            }
+        }
+        if (!current.empty()) call_args.push_back(current);
+        // trim call_args
+        for (auto& a : call_args) {
+            size_t s = a.find_first_not_of(" \t");
+            size_t e = a.find_last_not_of(" \t");
+            if (s != std::string::npos) a = a.substr(s, e - s + 1);
+        }
+
+        // Substitute args into body
+        std::string result = body;
+        for (size_t i = 0; i < param_names.size() && i < call_args.size(); i++) {
+            // Replace {{ param_name }} with call_arg in body
+            std::string var_pattern = "{{ " + param_names[i] + " }}";
+            std::string var_pattern_dot = "{{ " + param_names[i] + ".";
+            size_t pos = 0;
+            while ((pos = result.find(var_pattern_dot, pos)) != std::string::npos) {
+                // Find the closing }}
+                size_t end = result.find(" }}", pos);
+                if (end == std::string::npos) break;
+                // Replace {{ param.field }} with {{ call_arg.field }}
+                std::string replacement = "{{ " + call_args[i] + "." + result.substr(pos + var_pattern_dot.length(), end - pos - var_pattern_dot.length());
+                result.replace(pos, end + 3 - pos, replacement);
+                pos += replacement.length();
+            }
+            pos = 0;
+            while ((pos = result.find(var_pattern, pos)) != std::string::npos) {
+                result.replace(pos, var_pattern.length(), "{{ " + call_args[i] + " }}");
+                pos += call_args[i].length() + 6;
+            }
+        }
+        return result;
+    };
+
+    // Process namespaced calls first (utils::name)
+    std::string result;
+    while (true) {
+        std::smatch m;
+        if (!std::regex_search(content, m, re_call)) break;
+        std::string replacement = expand_one(m);
+        content.replace(m.position(), m.length(), replacement);
+    }
+
+    // Process short calls (name)
+    while (true) {
+        std::smatch m;
+        if (!std::regex_search(content, m, re_call_short)) break;
+        std::string replacement = expand_one(m);
+        content.replace(m.position(), m.length(), replacement);
+    }
+    return content;
+}
+
+// Strip macro definitions from content (after we've parsed them)
+static std::string strip_macros(const std::string& content) {
+    static std::regex re_macro(R"(\{%\-?\s*macro\s+.*?\{%\-?\s*endmacro\s*\-?%\})");
+    return std::regex_replace(content, re_macro, "");
+}
+
+// Resolve {% extends "parent" %} and {% block name %}...{% endblock %}
+// inja doesn't support inheritance, so we do it ourselves.
+static std::string resolve_extends(const std::string& content) {
+    static std::regex re_extends(R"(\{%\-?\s*extends\s+\"([^\"]+)\"\s*\-?%\})");
+    std::smatch m;
+    if (!std::regex_search(content, m, re_extends)) return content;
+
+    std::string parent_name = m[1].str();
+    std::string parent_content = load_raw_template(parent_name);
+    if (parent_content.empty()) return content;
+
+    // Parse macros from utils.html (used by many templates)
+    std::string utils_content = load_raw_template("utils.html");
+    auto macros = parse_macros(utils_content);
+
+    // Extract all blocks from the child
+    static std::regex re_block(R"(\{%\-?\s*block\s+(\w+)\s*\-?%\}([\s\S]*?)\{%\-?\s*endblock\s*\-?%\})");
+    std::unordered_map<std::string, std::string> child_blocks;
+    std::string child_after_extends = content.substr(m.position() + m.length());
+    auto it = std::sregex_iterator(child_after_extends.begin(), child_after_extends.end(), re_block);
+    for (; it != std::sregex_iterator(); ++it) {
+        child_blocks[(*it)[1].str()] = (*it)[2].str();
+    }
+
+    // Collect parent block positions (from right to left to avoid offset invalidation)
+    static std::regex re_block_parent(R"(\{%\-?\s*block\s+(\w+)\s*\-?%\}([\s\S]*?)\{%\-?\s*endblock\s*\-?%\})");
+    std::vector<std::tuple<size_t, size_t, std::string, std::string>> replacements;
+    auto pit = std::sregex_iterator(parent_content.begin(), parent_content.end(), re_block_parent);
+    for (; pit != std::sregex_iterator(); ++pit) {
+        std::string name = (*pit)[1].str();
+        std::string default_body = (*pit)[2].str();
+        auto cit = child_blocks.find(name);
+        std::string replacement = (cit != child_blocks.end() && !cit->second.empty())
+            ? cit->second : default_body;
+        replacements.emplace_back((*pit).position(), (*pit).length(), name, replacement);
+    }
+    std::sort(replacements.begin(), replacements.end(),
+              [](const auto& a, const auto& b) { return std::get<0>(a) > std::get<0>(b); });
+
+    std::string resolved = parent_content;
+    for (const auto& [pos, len, name, repl] : replacements) {
+        resolved.replace(pos, len, repl);
+    }
+
+    // Expand all {% call utils::name(args) %} and {% call name(args) %}
+    resolved = expand_calls(resolved, "utils", macros);
+
+    // Convert {% import "utils.html" as utils %} to include (inline the content)
+    static std::regex re_import(R"(\{%\-?\s*import\s+\"([^\"]+)\"\s+as\s+\w+\s*\-?%\})");
+    {
+        std::smatch im;
+        while (std::regex_search(resolved, im, re_import)) {
+            std::string imported = strip_macros(load_raw_template(im[1].str()));
+            resolved.replace(im.position(), im.length(), imported);
+        }
+    }
+
+    // Convert crate::utils::disable_indexing() calls to template var
+    static std::regex re_crate(R"(\{\%\s*if\s+crate::utils::disable_indexing\(\)\s*%\})");
+    resolved = std::regex_replace(resolved, re_crate, "{% if disable_indexing %}");
+
+    // Convert crate::utils::enable_rss() calls to template var
+    static std::regex re_rss(R"(\{\%\s*if\s+crate::utils::enable_rss\(\)\s*%\})");
+    resolved = std::regex_replace(resolved, re_rss, "{% if enable_rss %}");
+
+    // Convert other crate calls
+    static std::regex re_sfw(R"(\{\%\s*if\s+crate::utils::sfw_only\(\)\s*%\})");
+    resolved = std::regex_replace(resolved, re_sfw, "{% if sfw_only %}");
+    static std::regex re_nsfw(R"(\{\%\s*if\s+\!crate::utils::sfw_only\(\)\s*%\})");
+    resolved = std::regex_replace(resolved, re_nsfw, "{% if not sfw_only %}");
+
+    // Convert ResourceType enum comparisons
+    static std::regex re_rt_sub(R"(crate::utils::ResourceType::Subreddit)");
+    resolved = std::regex_replace(resolved, re_rt_sub, "\"Subreddit\"");
+    static std::regex re_rt_user(R"(crate::utils::ResourceType::User)");
+    resolved = std::regex_replace(resolved, re_rt_user, "\"User\"");
+    static std::regex re_rt_post(R"(crate::utils::ResourceType::Post)");
+    resolved = std::regex_replace(resolved, re_rt_post, "\"Post\"");
+
+    // Convert Rust method calls like sub.name.as_str() to just variable
+    static std::regex re_rust_call(R"(\.as_str\(\))");
+    resolved = std::regex_replace(resolved, re_rust_call, "");
+    static std::regex re_rust_concat(R"(\.concat\(\))");
+    resolved = std::regex_replace(resolved, re_rust_concat, "");
+
+    // Convert Rust array syntax [expr, expr] to inja list
+    static std::regex re_rust_array(R"(\[([^\]]+)\])");
+    // Skip if it contains inja markers like {{, {% - it's already inja
+    // Just handle simple cases like ["/r/", sub.name] -> need manual fix in templates
+
+    // Convert Rust string slicing post.permalink[1..]
+    static std::regex re_slice(R"(\.permalink\[1\.\.\])");
+    resolved = std::regex_replace(resolved, re_slice, ".permalink");
+
+    // Convert format!("{}%23{}", ...) calls - drop them, handled in C++
+    static std::regex re_format(R"(format\!\(\"[^\"]*\",\s*[^)]+\))");
+    resolved = std::regex_replace(resolved, re_format, "\"\"");
+
+    // Convert env vars references
+    static std::regex re_env(R"(\{\{\s*crate::instance_info::INSTANCE_INFO\.git_commit\s*\}\})");
+    resolved = std::regex_replace(resolved, re_env, "{{ git_commit }}");
+
+    return resolved;
+}
+
 std::string render_template(const std::string& template_name, const json& data) {
     try {
         auto env = inja::Environment{};
-        std::string tmpl = load_template_file(template_name);
-        if (tmpl.empty()) return "";
-        return env.render(tmpl, data);
+        env.set_throw_at_missing_includes(false);
+
+        std::string raw = load_raw_template(template_name);
+        if (raw.empty()) return "";
+
+        std::string resolved = resolve_extends(raw);
+        return env.render(resolved, data);
     } catch (const std::exception& e) {
         return "<html><body><h1>Template Error</h1><p>" + std::string(e.what()) + "</p></body></html>";
     }

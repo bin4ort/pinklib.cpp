@@ -57,8 +57,8 @@ int main(int argc, char* argv[]) {
     pinklib::init_oauth();
     pinklib::init_client();
 
-    std::string address = "[::]";
-    std::string port = "8080";
+    std::string address = "127.0.0.1";
+    std::string port = "8095";
     bool ipv4_only = false, ipv6_only = false;
 
     for (int i = 1; i < argc; i++) {
@@ -78,7 +78,7 @@ int main(int argc, char* argv[]) {
     if (std::getenv("IPV4_ONLY")) ipv4_only = true;
     if (std::getenv("IPV6_ONLY")) ipv6_only = true;
 
-    std::string listener = ipv4_only ? "0.0.0.0" : ipv6_only ? "::" : address;
+    std::string listener = ipv4_only ? "127.0.0.1" : ipv6_only ? "::1" : address;
     std::cout << "Starting PinkLib..." << std::endl;
 
     pinklib::Server app;
