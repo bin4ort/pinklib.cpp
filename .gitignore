@@ -1,0 +1,21 @@
+# Build
+build/
+_build/
+cmake-build-*/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+
+# Dependencies (fetched at build time)
+_deps/

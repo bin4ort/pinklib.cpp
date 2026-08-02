@@ -1,5 +1,6 @@
 #include "utils.h"
 #include "config.h"
+#include "templates_embedded.h"
 #include <regex>
 #include <sstream>
 #include <iomanip>
@@ -721,6 +722,10 @@ std::string deflate_decompress(const std::vector<uint8_t>& input) {
 
 // ---- Template Rendering ----
 static std::string load_template_file(const std::string& name) {
+    const auto& tmpls = embedded_templates();
+    auto it = tmpls.find(name);
+    if (it != tmpls.end()) return it->second;
+    // Fallback: try filesystem
     std::string path = "templates/" + name;
     std::ifstream file(path);
     if (!file.is_open()) return "";

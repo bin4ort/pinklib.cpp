@@ -1,1 +1,0 @@
-/usr/bin/c++ -O3 -DNDEBUG CMakeFiles/inja_benchmark.dir/test/benchmark.cpp.o -o inja_benchmark

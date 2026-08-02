@@ -1,5 +1,6 @@
 #include "oauth.h"
-#include "client.h"
+#include <httplib.h>
+#include <nlohmann/json.hpp>
 #include <random>
 #include <sstream>
 #include <thread>
@@ -17,19 +18,45 @@ static std::string gen_random_string(size_t length) {
     static const char charset[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     std::string result;
     result.resize(length);
-    unsigned char buf[length];
-    RAND_bytes(buf, length);
+    std::vector<unsigned char> buf(length);
+    RAND_bytes(buf.data(), length);
     for (size_t i = 0; i < length; i++) {
         result[i] = charset[buf[i] % (sizeof(charset) - 1)];
     }
     return result;
 }
 
+// Direct HTTP call to Reddit auth - does NOT use reddit_json() to avoid circular dep
+static std::string fetch_oauth_token(const std::string& device_id) {
+    httplib::Client cli("https://www.reddit.com");
+    cli.set_read_timeout(10);
+    cli.set_write_timeout(10);
+
+    httplib::Headers headers = {
+        {"User-Agent", "PinkLib/1.0"},
+        {"Content-Type", "application/x-www-form-urlencoded"},
+        {"Accept", "*/*"},
+        {"Authorization", "Basic M1hmQkpXbGlIdnFBQ25YcmZJWWxMdzo="},
+        {"Host", "www.reddit.com"}
+    };
+
+    std::string body = "grant_type=https%3A%2F%2Foauth.reddit.com%2Fgrants%2Finstalled_client&device_id=" + device_id;
+
+    auto res = cli.Post("/api/v1/access_token", headers, body, "application/x-www-form-urlencoded");
+    if (res && res->status == 200) {
+        return res->body;
+    }
+    return "";
+}
+
 void init_oauth() {
-    std::lock_guard<std::mutex> lock(OAUTH_MUTEX);
-    if (OAUTH_CLIENT) return;
-    OAUTH_CLIENT = std::make_shared<Oauth>(Oauth::create());
-    // Start token daemon in background
+    // Create an initial OAuth client WITHOUT locking OAUTH_MUTEX during HTTP call
+    auto client = Oauth::create();
+    {
+        std::lock_guard<std::mutex> lock(OAUTH_MUTEX);
+        if (OAUTH_CLIENT) return; // already initialized by another thread
+        OAUTH_CLIENT = std::make_shared<Oauth>(std::move(client));
+    }
     std::thread([]() { token_daemon(); }).detach();
 }
 
@@ -37,12 +64,10 @@ Oauth Oauth::create() {
     Oauth oauth;
     oauth.is_mobile_spoof = true;
 
-    // Generate device-like credentials
     std::string uuid = gen_random_string(8) + "-" + gen_random_string(4) + "-" +
                        gen_random_string(4) + "-" + gen_random_string(4) + "-" + gen_random_string(12);
     std::string device_id = gen_random_string(20);
 
-    // Build headers for Reddit API
     oauth.headers_map = {
         {"User-Agent", "PinkLib/1.0"},
         {"Content-Type", "application/json; charset=UTF-8"},
@@ -50,20 +75,23 @@ Oauth Oauth::create() {
         {"client-vendor-id", uuid}
     };
 
-    // Try to authenticate with Reddit
+    // Fetch OAuth token via direct HTTP (no circular dependency)
     try {
-        std::string auth_body = "grant_type=https%3A%2F%2Foauth.reddit.com%2Fgrants%2Finstalled_client&device_id=" + device_id;
-        auto json_resp = reddit_json("/api/v1/access_token", false);
-        if (json_resp.contains("access_token")) {
-            std::string token = json_resp["access_token"].get<std::string>();
-            oauth.headers_map["Authorization"] = "Bearer " + token;
-            oauth.expires_in = json_resp.value("expires_in", 3600ULL);
+        std::string resp_body = fetch_oauth_token(device_id);
+        if (!resp_body.empty()) {
+            auto json_resp = nlohmann::json::parse(resp_body);
+            if (json_resp.contains("access_token")) {
+                std::string token = json_resp["access_token"].get<std::string>();
+                oauth.headers_map["Authorization"] = "Bearer " + token;
+                oauth.expires_in = json_resp.value("expires_in", 3600ULL);
+                return oauth;
+            }
         }
-    } catch (...) {
-        // Fall back to generic web auth
-        oauth.is_mobile_spoof = false;
-    }
+    } catch (...) {}
 
+    // Fallback: create without token (will serve generic responses)
+    oauth.is_mobile_spoof = false;
+    oauth.expires_in = 3600;
     return oauth;
 }
 

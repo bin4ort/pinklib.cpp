@@ -9,10 +9,9 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
-# ---- Dependencies via FetchContent ----
 include(FetchContent)
 
-# inja template engine
+# ---- inja template engine (includes nlohmann/json embedded) ----
 set(INJA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(INJA_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
 set(INJA_INSTALL OFF CACHE BOOL "" FORCE)
@@ -24,7 +23,7 @@ FetchContent_Declare(inja
 )
 FetchContent_MakeAvailable(inja)
 
-# cpp-httplib
+# ---- cpp-httplib ----
 FetchContent_Declare(httplib
   GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
   GIT_TAG v0.18.3
@@ -32,19 +31,7 @@ FetchContent_Declare(httplib
 )
 FetchContent_MakeAvailable(httplib)
 
-# inja template engine (includes nlohmann/json embedded)
-set(INJA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(INJA_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
-set(INJA_INSTALL OFF CACHE BOOL "" FORCE)
-set(INJA_USE_EMBEDDED_JSON ON CACHE BOOL "" FORCE)
-FetchContent_Declare(inja
-  GIT_REPOSITORY https://github.com/pantor/inja.git
-  GIT_TAG v3.4.0
-  GIT_SHALLOW TRUE
-)
-FetchContent_MakeAvailable(inja)
-
-# tomlplusplus
+# ---- tomlplusplus ----
 FetchContent_Declare(tomlplusplus
   GIT_REPOSITORY https://github.com/marzer/tomlplusplus.git
   GIT_TAG v3.4.0
@@ -52,7 +39,7 @@ FetchContent_Declare(tomlplusplus
 )
 FetchContent_MakeAvailable(tomlplusplus)
 
-# ---- Find system packages ----
+# ---- System packages ----
 find_package(OpenSSL REQUIRED)
 find_package(ZLIB REQUIRED)
 
@@ -62,6 +49,18 @@ FetchContent_Declare(brotli
   GIT_TAG v1.1.0
 )
 FetchContent_MakeAvailable(brotli)
+
+# ---- Embed templates into C++ header ----
+# Regenerate when any template file changes
+file(GLOB TEMPLATE_FILES templates/*.html)
+add_custom_command(
+  OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/src/templates_embedded.h
+  COMMAND ${CMAKE_COMMAND} -E env python3 "${CMAKE_CURRENT_SOURCE_DIR}/scripts/embed_templates.py"
+  DEPENDS scripts/embed_templates.py ${TEMPLATE_FILES}
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+  COMMENT "Embedding HTML templates..."
+)
+add_custom_target(embed_templates DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/templates_embedded.h)
 
 # ---- Source files ----
 set(PINKLIB_SOURCES
@@ -85,9 +84,11 @@ set(PINKLIB_HEADERS
   src/oauth_resources.h
   src/handlers.h
   src/subreddit.h
+  src/templates_embedded.h
 )
 
 add_executable(pinklib ${PINKLIB_SOURCES} ${PINKLIB_HEADERS})
+add_dependencies(pinklib embed_templates)
 
 target_include_directories(pinklib PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -107,7 +108,6 @@ target_link_libraries(pinklib PRIVATE
   brotlicommon
 )
 
-# Enable threading
 find_package(Threads REQUIRED)
 target_link_libraries(pinklib PRIVATE Threads::Threads)
 
