@@ -123,6 +123,7 @@ struct Preferences {
     void populate_available_themes();
     std::string to_urlencoded() const;
     std::string to_bincode_str() const;
+    nlohmann::json to_json() const;
 
 private:
     static std::string pref_setting(const std::unordered_map<std::string, std::string>& cookies,

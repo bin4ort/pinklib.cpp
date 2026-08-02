@@ -323,8 +323,34 @@ std::string Preferences::to_urlencoded() const {
 }
 
 std::string Preferences::to_bincode_str() const {
-    // Simplified: just use urlencoded for now
     return to_urlencoded();
+}
+
+nlohmann::json Preferences::to_json() const {
+    json j;
+    j["theme"] = theme;
+    j["front_page"] = front_page;
+    j["layout"] = layout;
+    j["wide"] = wide;
+    j["blur_spoiler"] = blur_spoiler;
+    j["show_nsfw"] = show_nsfw;
+    j["blur_nsfw"] = blur_nsfw;
+    j["hide_hls_notification"] = hide_hls_notification;
+    j["use_hls"] = use_hls;
+    j["autoplay_videos"] = autoplay_videos;
+    j["fixed_navbar"] = fixed_navbar;
+    j["disable_visit_reddit_confirmation"] = disable_visit_reddit_confirmation;
+    j["comment_sort"] = comment_sort;
+    j["post_sort"] = post_sort;
+    j["hide_awards"] = hide_awards;
+    j["hide_score"] = hide_score;
+    j["hide_sidebar_and_summary"] = hide_sidebar_and_summary;
+    j["video_quality"] = video_quality;
+    j["remove_default_feeds"] = remove_default_feeds;
+    j["subscriptions"] = subscriptions;
+    j["filters"] = filters;
+    j["available_themes"] = available_themes;
+    return j;
 }
 
 // ---- Post ----
@@ -856,7 +882,7 @@ static std::string expand_calls(std::string content, const std::string& ns,
 
 // Strip macro definitions from content (after we've parsed them)
 static std::string strip_macros(const std::string& content) {
-    static std::regex re_macro(R"(\{%\-?\s*macro\s+.*?\{%\-?\s*endmacro\s*\-?%\})");
+    static std::regex re_macro(R"(\{%\-?\s*macro\s+[\s\S]*?\{%\-?\s*endmacro\s*\-?%\})");
     return std::regex_replace(content, re_macro, "");
 }
 
@@ -974,6 +1000,15 @@ std::string render_template(const std::string& template_name, const json& data) 
         if (raw.empty()) return "";
 
         std::string resolved = resolve_extends(raw);
+
+        // Handle any remaining {% include "file" %} by inlining before inja
+        static std::regex re_include(R"(\{%\-?\s*include\s+\"([^\"]+)\"\s*\-?%\})");
+        std::smatch inc;
+        while (std::regex_search(resolved, inc, re_include)) {
+            std::string included = load_raw_template(inc[1].str());
+            resolved.replace(inc.position(), inc.length(), included);
+        }
+
         return env.render(resolved, data);
     } catch (const std::exception& e) {
         return "<html><body><h1>Template Error</h1><p>" + std::string(e.what()) + "</p></body></html>";

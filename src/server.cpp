@@ -208,7 +208,7 @@ std::string error_response(const std::string& msg, const Preferences& prefs, con
     json data;
     data["msg"] = msg;
     data["url"] = url;
-    data["prefs"] = json::object();
+    data["prefs"] = prefs.to_json();
     return render_template("error.html", data);
 }
 
@@ -216,7 +216,7 @@ std::string info_response(const std::string& msg, const Preferences& prefs, cons
     json data;
     data["msg"] = msg;
     data["url"] = url;
-    data["prefs"] = json::object();
+    data["prefs"] = prefs.to_json();
     return render_template("info.html", data);
 }
 
@@ -227,7 +227,7 @@ std::string nsfw_landing_response(const std::string& res, ResourceType res_type,
     data["res_type"] = (res_type == ResourceType::Subreddit) ? "Subreddit" :
                         (res_type == ResourceType::User) ? "User" : "Post";
     data["url"] = url;
-    data["prefs"] = json::object();
+    data["prefs"] = prefs.to_json();
     return render_template("nsfwlanding.html", data);
 }
 

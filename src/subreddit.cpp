@@ -17,7 +17,7 @@ static std::string quarantine_wall(const std::string& sub, const std::string& re
     data["sub"] = sub;
     data["msg"] = "Please click the button below to continue to this subreddit.";
     data["url"] = url;
-    data["prefs"] = json::object();
+    data["prefs"] = prefs.to_json();
     return render_template("wall.html", data);
 }
 
@@ -136,7 +136,7 @@ std::string subreddit_community(const std::string& path,
         data["posts"] = json::array();
         data["sort"] = json::array({sort, ""});
         data["ends"] = json::array({"", ""});
-        data["prefs"] = json::object();
+        data["prefs"] = prefs.to_json();
         data["url"] = req_url;
         data["redirect_url"] = "";
         data["is_filtered"] = true;
@@ -227,7 +227,7 @@ std::string subreddit_community(const std::string& path,
         data["posts"] = posts_arr;
         data["sort"] = json::array({sort, ""});
         data["ends"] = json::array({"", after});
-        data["prefs"] = json::object();
+        data["prefs"] = prefs.to_json();
         data["url"] = req_url;
         data["redirect_url"] = "";
         data["is_filtered"] = false;
@@ -275,7 +275,7 @@ std::string subreddit_wiki(const std::string& path,
         data["sub"] = sub;
         data["wiki"] = rewrite_urls(res["data"].value("content_html", "<h3>Wiki not found</h3>"));
         data["page"] = page;
-        data["prefs"] = json::object();
+        data["prefs"] = prefs.to_json();
         data["url"] = req_url;
         return build_template("wiki.html", data);
     } catch (const std::exception& e) {
@@ -311,7 +311,7 @@ std::string subreddit_sidebar(const std::string& path,
         data["wiki"] = rewrite_urls(val(res, "description_html"));
         data["sub"] = sub;
         data["page"] = "Sidebar";
-        data["prefs"] = json::object();
+        data["prefs"] = prefs.to_json();
         data["url"] = req_url;
         return build_template("wiki.html", data);
     } catch (const std::exception& e) {

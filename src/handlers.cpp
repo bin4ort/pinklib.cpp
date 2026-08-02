@@ -129,7 +129,7 @@ std::string post_item(const std::string& path,
         data["comments"] = comments_arr;
 
         data["sort"] = sort;
-        data["prefs"] = json::object();
+        data["prefs"] = prefs.to_json();
         data["single_thread"] = false;
         data["url"] = req_url;
         data["url_without_query"] = path;
@@ -231,7 +231,7 @@ std::string user_profile(const std::string& path,
         data["sort"] = json::array({"", ""});
         data["ends"] = json::array({"", after});
         data["listing"] = listing;
-        data["prefs"] = json::object();
+        data["prefs"] = prefs.to_json();
         data["url"] = req_url;
         data["redirect_url"] = "";
         data["is_filtered"] = false;
@@ -345,7 +345,7 @@ std::string search_find(const std::string& path,
         data["params"]["t"] = "";
         data["params"]["after"] = after;
         data["params"]["before"] = "";
-        data["prefs"] = json::object();
+        data["prefs"] = prefs.to_json();
         data["url"] = req_url;
         data["is_filtered"] = false;
         data["all_posts_filtered"] = false;
@@ -366,7 +366,7 @@ std::string settings_get(const std::string& path,
     Preferences prefs = Preferences::from_cookies(cookies);
 
     json data;
-    data["prefs"] = json::object();
+    data["prefs"] = prefs.to_json();
     data["prefs"]["theme"] = prefs.theme;
     data["prefs"]["front_page"] = prefs.front_page;
     data["prefs"]["layout"] = prefs.layout;
@@ -505,7 +505,7 @@ std::string duplicates_item(const std::string& path,
             dups_arr.push_back(dj);
         }
         data["duplicates"] = dups_arr;
-        data["prefs"] = json::object();
+        data["prefs"] = prefs.to_json();
         data["url"] = req_url;
         data["num_posts_filtered"] = 0;
         data["all_posts_filtered"] = false;
@@ -549,7 +549,7 @@ std::string instance_info_page(const std::string& path,
     json data;
     data["title"] = "Instance Information";
     data["body"] = "<h2>PinkLib v0.36.0</h2><p>A private front-end for Reddit written in C++</p>";
-    data["prefs"] = json::object();
+    data["prefs"] = prefs.to_json();
     data["url"] = path;
 
     return render_template("message.html", data);
