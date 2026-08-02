@@ -1,0 +1,3 @@
+/home/stry4ok/Development/Projects/pinklib-cpp/build/_deps/brotli-subbuild/CMakeFiles/brotli-populate.dir
+/home/stry4ok/Development/Projects/pinklib-cpp/build/_deps/brotli-subbuild/CMakeFiles/edit_cache.dir
+/home/stry4ok/Development/Projects/pinklib-cpp/build/_deps/brotli-subbuild/CMakeFiles/rebuild_cache.dir

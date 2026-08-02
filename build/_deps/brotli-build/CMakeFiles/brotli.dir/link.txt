@@ -1,0 +1,1 @@
+/usr/bin/cc -O3 -DNDEBUG CMakeFiles/brotli.dir/c/tools/brotli.c.o -o brotli  libbrotlienc.a libbrotlidec.a libbrotlicommon.a -lm

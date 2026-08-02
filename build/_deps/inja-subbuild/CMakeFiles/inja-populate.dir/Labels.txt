@@ -1,0 +1,14 @@
+# Target labels
+ inja-populate
+# Source files and their labels
+/home/stry4ok/Development/Projects/pinklib-cpp/build/_deps/inja-subbuild/CMakeFiles/inja-populate
+/home/stry4ok/Development/Projects/pinklib-cpp/build/_deps/inja-subbuild/CMakeFiles/inja-populate.rule
+/home/stry4ok/Development/Projects/pinklib-cpp/build/_deps/inja-subbuild/CMakeFiles/inja-populate-complete.rule
+/home/stry4ok/Development/Projects/pinklib-cpp/build/_deps/inja-subbuild/inja-populate-prefix/src/inja-populate-stamp/inja-populate-build.rule
+/home/stry4ok/Development/Projects/pinklib-cpp/build/_deps/inja-subbuild/inja-populate-prefix/src/inja-populate-stamp/inja-populate-configure.rule
+/home/stry4ok/Development/Projects/pinklib-cpp/build/_deps/inja-subbuild/inja-populate-prefix/src/inja-populate-stamp/inja-populate-download.rule
+/home/stry4ok/Development/Projects/pinklib-cpp/build/_deps/inja-subbuild/inja-populate-prefix/src/inja-populate-stamp/inja-populate-install.rule
+/home/stry4ok/Development/Projects/pinklib-cpp/build/_deps/inja-subbuild/inja-populate-prefix/src/inja-populate-stamp/inja-populate-mkdir.rule
+/home/stry4ok/Development/Projects/pinklib-cpp/build/_deps/inja-subbuild/inja-populate-prefix/src/inja-populate-stamp/inja-populate-patch.rule
+/home/stry4ok/Development/Projects/pinklib-cpp/build/_deps/inja-subbuild/inja-populate-prefix/src/inja-populate-stamp/inja-populate-test.rule
+/home/stry4ok/Development/Projects/pinklib-cpp/build/_deps/inja-subbuild/inja-populate-prefix/src/inja-populate-stamp/inja-populate-update.rule
