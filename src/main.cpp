@@ -5,12 +5,29 @@
 #include "handlers.h"
 #include "subreddit.h"
 #include "oauth.h"
+#include "static_embedded.h"
 
 #include <iostream>
 #include <fstream>
 #include <sstream>
 #include <cstdlib>
 #include <functional>
+
+static std::string serve_static(const std::string& url_path) {
+    const auto& s = pinklib::embedded_static();
+    // Clean path (start with /)
+    std::string p = url_path;
+    if (!p.empty() && p[0] != '/') p = "/" + p;
+    auto it = s.find(p);
+    if (it != s.end()) return it->second.content;
+    // Fallback: try filesystem
+    std::string fpath = "static" + p;
+    std::ifstream file(fpath, std::ios::binary);
+    if (!file.is_open()) return "";
+    std::stringstream buf;
+    buf << file.rdbuf();
+    return buf.str();
+}
 
 // Type alias for handlers
 using Handler = std::function<std::string(
@@ -212,21 +229,9 @@ int main(int argc, char* argv[]) {
     if (req_path.starts_with("/emote/")) return "";
     if (req_path.starts_with("/hls/")) return "";
 
-    // JS and other static assets
-    if (req_path == "/playHLSVideo.js") return read_file("static/playHLSVideo.js");
-    if (req_path == "/hls.min.js") return read_file("static/hls.min.js");
-    if (req_path == "/highlighted.js") return read_file("static/highlighted.js");
-    if (req_path == "/check_update.js") return read_file("static/check_update.js");
-    if (req_path == "/copy.js") return read_file("static/copy.js");
-    if (req_path == "/logo.png") return read_file("static/logo.png");
-    if (req_path == "/apple-touch-icon.png") return read_file("static/apple-touch-icon.png");
-    if (req_path == "/touch-icon-iphone.png") return read_file("static/apple-touch-icon.png");
-    if (req_path == "/Inter.var.woff2") return read_file("static/Inter.var.woff2");
-    if (req_path == "/manifest.json") return read_file("static/manifest.json");
-    if (req_path == "/opensearch.xml") return read_file("static/opensearch.xml");
-
-    // favicon
-    if (req_path == "/favicon.ico") return read_file("static/favicon.ico");
+    // Serve static assets (embedded or from disk)
+    std::string static_body = serve_static(req_path);
+    if (!static_body.empty()) return static_body;
 
     // 404
     return pinklib::error_response("Nothing here",
