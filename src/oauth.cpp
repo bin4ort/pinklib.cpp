@@ -29,8 +29,9 @@ static std::string gen_random_string(size_t length) {
 // Direct HTTP call to Reddit auth - does NOT use reddit_json() to avoid circular dep
 static std::string fetch_oauth_token(const std::string& device_id) {
     httplib::Client cli("https://www.reddit.com");
-    cli.set_read_timeout(10);
-    cli.set_write_timeout(10);
+    cli.set_read_timeout(5);   // 5 second timeout
+    cli.set_write_timeout(5);
+    cli.set_connection_timeout(5);
 
     httplib::Headers headers = {
         {"User-Agent", "PinkLib/1.0"},

@@ -886,8 +886,48 @@ static std::string strip_macros(const std::string& content) {
     return std::regex_replace(content, re_macro, "");
 }
 
+// Extract blocks from template content, handling nesting properly
+static std::unordered_map<std::string, std::string> extract_blocks(const std::string& content) {
+    std::unordered_map<std::string, std::string> blocks;
+    static std::regex re_block_open(R"(\{%\-?\s*block\s+(\w+)\s*\-?%\})");
+    static std::regex re_block_close(R"(\{%\-?\s*endblock\s*\-?%\})");
+
+    auto it = std::sregex_iterator(content.begin(), content.end(), re_block_open);
+    for (; it != std::sregex_iterator(); ++it) {
+        std::string name = (*it)[1].str();
+        size_t start = (*it).position() + (*it).length();
+        // Find matching endblock by tracking depth
+        int depth = 1;
+        size_t pos = start;
+        auto close_it = std::sregex_iterator(content.begin() + start, content.end(), re_block_close);
+        auto open_it = std::sregex_iterator(content.begin() + start, content.end(), re_block_open);
+        // Walk through all block tags to find the matching close
+        while (depth > 0) {
+            size_t next_open = std::string::npos;
+            size_t next_close = std::string::npos;
+            auto oit = std::sregex_iterator(content.begin() + pos, content.end(), re_block_open);
+            auto cit = std::sregex_iterator(content.begin() + pos, content.end(), re_block_close);
+            if (oit != std::sregex_iterator()) next_open = pos + oit->position();
+            if (cit != std::sregex_iterator()) next_close = pos + cit->position();
+            if (next_close == std::string::npos) break;
+            if (next_open != std::string::npos && next_open < next_close) {
+                depth++;
+                pos = next_open + oit->length();
+            } else {
+                depth--;
+                if (depth == 0) {
+                    size_t body_end = next_close;
+                    blocks[name] = content.substr(start, body_end - start);
+                }
+                pos = next_close + cit->length();
+            }
+        }
+    }
+    return blocks;
+}
+
 // Resolve {% extends "parent" %} and {% block name %}...{% endblock %}
-// inja doesn't support inheritance, so we do it ourselves.
+// Properly handles nested blocks by tracking depth.
 static std::string resolve_extends(const std::string& content) {
     static std::regex re_extends(R"(\{%\-?\s*extends\s+\"([^\"]+)\"\s*\-?%\})");
     std::smatch m;
@@ -901,26 +941,47 @@ static std::string resolve_extends(const std::string& content) {
     std::string utils_content = load_raw_template("utils.html");
     auto macros = parse_macros(utils_content);
 
-    // Extract all blocks from the child
-    static std::regex re_block(R"(\{%\-?\s*block\s+(\w+)\s*\-?%\}([\s\S]*?)\{%\-?\s*endblock\s*\-?%\})");
+    static std::regex re_block_open(R"(\{%\-?\s*block\s+(\w+)\s*\-?%\})");
+    static std::regex re_block_close(R"(\{%\-?\s*endblock\s*\-?%\})");
     std::unordered_map<std::string, std::string> child_blocks;
-    std::string child_after_extends = content.substr(m.position() + m.length());
-    auto it = std::sregex_iterator(child_after_extends.begin(), child_after_extends.end(), re_block);
-    for (; it != std::sregex_iterator(); ++it) {
-        child_blocks[(*it)[1].str()] = (*it)[2].str();
-    }
-
-    // Collect parent block positions (from right to left to avoid offset invalidation)
-    static std::regex re_block_parent(R"(\{%\-?\s*block\s+(\w+)\s*\-?%\}([\s\S]*?)\{%\-?\s*endblock\s*\-?%\})");
     std::vector<std::tuple<size_t, size_t, std::string, std::string>> replacements;
-    auto pit = std::sregex_iterator(parent_content.begin(), parent_content.end(), re_block_parent);
-    for (; pit != std::sregex_iterator(); ++pit) {
-        std::string name = (*pit)[1].str();
-        std::string default_body = (*pit)[2].str();
-        auto cit = child_blocks.find(name);
-        std::string replacement = (cit != child_blocks.end() && !cit->second.empty())
-            ? cit->second : default_body;
-        replacements.emplace_back((*pit).position(), (*pit).length(), name, replacement);
+    std::string child_after_extends = content.substr(m.position() + m.length());
+
+    // Extract all blocks from the child (properly handle nesting)
+    child_blocks = extract_blocks(child_after_extends);
+
+    // Collect parent block positions with proper nesting matching
+    {
+        auto it_p = std::sregex_iterator(parent_content.begin(), parent_content.end(), re_block_open);
+        for (; it_p != std::sregex_iterator(); ++it_p) {
+            std::string name = (*it_p)[1].str();
+            size_t start = (*it_p).position();
+            size_t body_start = start + (*it_p).length();
+            int depth = 1;
+            size_t pos = body_start;
+            while (depth > 0) {
+                size_t next_open = std::string::npos, next_close = std::string::npos;
+                auto oit = std::sregex_iterator(parent_content.begin() + pos, parent_content.end(), re_block_open);
+                auto cit = std::sregex_iterator(parent_content.begin() + pos, parent_content.end(), re_block_close);
+                if (oit != std::sregex_iterator()) next_open = pos + oit->position();
+                if (cit != std::sregex_iterator()) next_close = pos + cit->position();
+                if (next_close == std::string::npos) break;
+                if (next_open != std::string::npos && next_open < next_close) {
+                    depth++;
+                    pos = next_open + oit->length();
+                } else {
+                    depth--;
+                    if (depth == 0) {
+                        auto cit2 = child_blocks.find(name);
+                        std::string repl = (cit2 != child_blocks.end() && !cit2->second.empty())
+                            ? cit2->second
+                            : parent_content.substr(body_start, next_close - body_start);
+                        replacements.emplace_back(start, next_close + cit->length() - start, name, repl);
+                    }
+                    pos = next_close + cit->length();
+                }
+            }
+        }
     }
     std::sort(replacements.begin(), replacements.end(),
               [](const auto& a, const auto& b) { return std::get<0>(a) > std::get<0>(b); });
@@ -993,23 +1054,28 @@ static std::string resolve_extends(const std::string& content) {
 
 std::string render_template(const std::string& template_name, const json& data) {
     try {
-        auto env = inja::Environment{};
-        env.set_throw_at_missing_includes(false);
-
-        // Inject global template variables
-        json data_with_globals = data;
-        data_with_globals["disable_indexing"] = disable_indexing();
-        data_with_globals["enable_rss"] = enable_rss();
-        data_with_globals["sfw_only"] = sfw_only();
-        data_with_globals["version"] = "0.36.0";
-        data_with_globals["git_commit"] = "cpp";
+        // Inject globals
+        json d = data;
+        d["disable_indexing"] = disable_indexing();
+        d["enable_rss"] = enable_rss();
+        d["sfw_only"] = sfw_only();
+        d["version"] = "0.36.0";
+        d["git_commit"] = "cpp";
 
         std::string raw = load_raw_template(template_name);
-        if (raw.empty()) return "";
+        if (raw.empty()) return "<html><body>Template not found: " + template_name + "</body></html>";
 
+        // Resolve extends/blocks/macros/imports
         std::string resolved = resolve_extends(raw);
 
-        // Handle any remaining {% include "file" %} by inlining
+        // Final cleanup: convert any remaining {% block %}/{% endblock %} to nothing
+        // (they should have been resolved by now, but just in case)
+        static std::regex re_block_any(R"(\{%\-?\s*block\s+\w+.*?%\})");
+        resolved = std::regex_replace(resolved, re_block_any, "");
+        static std::regex re_endblock_any(R"(\{%\-?\s*endblock\s*\-?%\})");
+        resolved = std::regex_replace(resolved, re_endblock_any, "");
+
+        // Handle remaining includes
         static std::regex re_include(R"(\{%\-?\s*include\s+\"([^\"]+)\"\s*\-?%\})");
         std::smatch inc;
         while (std::regex_search(resolved, inc, re_include)) {
@@ -1017,7 +1083,8 @@ std::string render_template(const std::string& template_name, const json& data) 
             resolved.replace(inc.position(), inc.length(), included);
         }
 
-        return env.render(resolved, data_with_globals);
+        auto env = inja::Environment{};
+        return env.render(resolved, d);
     } catch (const std::exception& e) {
         return "<html><body><h1>Template Error</h1><p>" + std::string(e.what()) + "</p></body></html>";
     }

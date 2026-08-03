@@ -16,8 +16,9 @@ static httplib::Client* reddit_client() {
     static thread_local auto cli = []() -> std::unique_ptr<httplib::Client> {
         auto c = std::make_unique<httplib::Client>("https://oauth.reddit.com");
         c->set_follow_location(false);
-        c->set_read_timeout(30);
-        c->set_write_timeout(30);
+        c->set_read_timeout(10);
+        c->set_write_timeout(10);
+        c->set_connection_timeout(5);
         return c;
     }();
     return cli.get();

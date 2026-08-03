@@ -6,6 +6,24 @@
 
 namespace pinklib {
 
+static std::string content_type_for(const std::string& path) {
+    auto pos = path.rfind('.');
+    if (pos == std::string::npos) return "text/html; charset=utf-8";
+    std::string ext = path.substr(pos);
+    if (ext == ".css")  return "text/css";
+    if (ext == ".js")   return "text/javascript";
+    if (ext == ".png")  return "image/png";
+    if (ext == ".ico")  return "image/vnd.microsoft.icon";
+    if (ext == ".svg")  return "image/svg+xml";
+    if (ext == ".woff2") return "font/woff2";
+    if (ext == ".json") return "application/json";
+    if (ext == ".xml")  return "application/opensearchdescription+xml";
+    if (ext == ".rss" || ext == ".atom") return "application/rss+xml";
+    if (ext == ".txt")  return "text/plain";
+    if (ext == ".mp4")  return "video/mp4";
+    return "text/html; charset=utf-8";
+}
+
 void Server::at(const std::string& path, RequestHandler handler) {
     routes.push_back({"GET", path, handler});
 }
@@ -129,7 +147,7 @@ void Server::listen(const std::string& address, int port) {
                 }
 
                 // Determine content type from response
-                std::string content_type = "text/html; charset=utf-8";
+                std::string content_type = content_type_for(req.path);
 
                 // Brotli compression
                 auto accept_enc = req.get_header_value("Accept-Encoding");
