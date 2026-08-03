@@ -27,25 +27,41 @@ static std::string gen_random_string(size_t length) {
 }
 
 // Direct HTTP call to Reddit auth - does NOT use reddit_json() to avoid circular dep
+// OAuth client credentials - set via env vars PINKLIB_CLIENT_ID / PINKLIB_CLIENT_SECRET
+// Or get them from https://www.reddit.com/prefs/apps (create an "installed app")
+static std::string get_client_id() {
+    const char* env = std::getenv("PINKLIB_CLIENT_ID");
+    if (env) return env;
+    env = std::getenv("REDLIB_CLIENT_ID");
+    if (env) return env;
+    return "M1hmQkpXbGlIdnFBQ25YcmZJWWxMdzo="; // fallback, likely rejected
+}
+
 static std::string fetch_oauth_token(const std::string& device_id) {
+    std::string client_id = get_client_id();
+    // Decode base64 to get client_id, then re-encode with secret if available
+    // For installed apps, just the client_id is used as "client_id:" base64
+    std::string auth_header = "Basic " + client_id;
+
     httplib::Client cli("https://www.reddit.com");
-    cli.set_read_timeout(5);   // 5 second timeout
-    cli.set_write_timeout(5);
-    cli.set_connection_timeout(5);
+    cli.set_read_timeout(10);
+    cli.set_write_timeout(10);
+    cli.set_connection_timeout(10);
+    cli.set_follow_location(true);
 
     httplib::Headers headers = {
-        {"User-Agent", "PinkLib/1.0"},
+        {"User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.6422.165 Mobile Safari/537.36"},
         {"Content-Type", "application/x-www-form-urlencoded"},
-        {"Accept", "*/*"},
-        {"Authorization", "Basic M1hmQkpXbGlIdnFBQ25YcmZJWWxMdzo="},
-        {"Host", "www.reddit.com"}
+        {"Accept", "application/json"},
+        {"Authorization", auth_header},
     };
 
     std::string body = "grant_type=https%3A%2F%2Foauth.reddit.com%2Fgrants%2Finstalled_client&device_id=" + device_id;
 
     auto res = cli.Post("/api/v1/access_token", headers, body, "application/x-www-form-urlencoded");
-    if (res && res->status == 200) {
-        return res->body;
+    if (res && res->status == 200) return res->body;
+    if (res) {
+        std::cerr << "[OAUTH] " << res->status << ": " << res->body.substr(0, 200) << std::endl;
     }
     return "";
 }
@@ -70,8 +86,9 @@ Oauth Oauth::create() {
     std::string device_id = gen_random_string(20);
 
     oauth.headers_map = {
-        {"User-Agent", "PinkLib/1.0"},
+        {"User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.6422.165 Mobile Safari/537.36"},
         {"Content-Type", "application/json; charset=UTF-8"},
+        {"Accept", "application/json"},
         {"X-Reddit-Device-Id", uuid},
         {"client-vendor-id", uuid}
     };

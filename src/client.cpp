@@ -45,9 +45,11 @@ static httplib::Headers build_headers(bool quarantine, const std::string& path) 
         }
     }
 
-    // Default User-Agent if none set by OAuth
     if (headers.find("User-Agent") == headers.end()) {
-        headers.emplace("User-Agent", "PinkLib/1.0");
+        headers.emplace("User-Agent", "Mozilla/5.0 (Linux; Android 14) Chrome/125.0.6422.165 Mobile Safari/537.36");
+    }
+    if (headers.find("Accept") == headers.end()) {
+        headers.emplace("Accept", "application/json");
     }
 
     if (quarantine) {
@@ -92,8 +94,10 @@ json reddit_json(const std::string& path, bool quarantine) {
         }
     }
 
-    if (result->status == 429) {
-        throw std::runtime_error("Too many requests");
+    if (result->status == 429 || result->status == 403) {
+        std::cerr << "[REDDIT] API returned " << result->status << ": " << result->body.substr(0, 200) << std::endl;
+        throw std::runtime_error("Reddit API returned " + std::to_string(result->status) +
+            (result->status == 429 ? " (rate limited)" : " (forbidden)"));
     }
 
     // Parse JSON
