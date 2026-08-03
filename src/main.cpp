@@ -70,9 +70,9 @@ int main(int argc, char* argv[]) {
     }
 
     pinklib::init_config();
-    std::cout << "Initializing OAuth client..." << std::endl;
-    pinklib::init_oauth();
-    pinklib::init_client();
+    std::cout << "Starting PinkLib..." << std::endl;
+    // Start OAuth in background - server starts immediately
+    std::thread([]() { pinklib::init_oauth(); }).detach();
 
     std::string address = "127.0.0.1";
     std::string port = "8095";

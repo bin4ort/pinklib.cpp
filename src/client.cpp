@@ -16,9 +16,9 @@ static httplib::Client* reddit_client() {
     static thread_local auto cli = []() -> std::unique_ptr<httplib::Client> {
         auto c = std::make_unique<httplib::Client>("https://oauth.reddit.com");
         c->set_follow_location(false);
-        c->set_read_timeout(10);
-        c->set_write_timeout(10);
-        c->set_connection_timeout(5);
+        c->set_read_timeout(15);
+        c->set_write_timeout(15);
+        c->set_connection_timeout(10);
         return c;
     }();
     return cli.get();
@@ -30,10 +30,6 @@ static httplib::Client* www_client() {
 }
 
 static std::pair<httplib::Client*, std::string> resolve_client(const std::string& path) {
-    // Some paths go to www.reddit.com instead of oauth
-    if (path.find("/api/v1/access_token") != std::string::npos) {
-        return {www_client(), path};
-    }
     return {reddit_client(), path};
 }
 
@@ -49,8 +45,10 @@ static httplib::Headers build_headers(bool quarantine, const std::string& path) 
         }
     }
 
-    // Shuffle headers for anti-detection
-    // (simplified - real version would randomize order)
+    // Default User-Agent if none set by OAuth
+    if (headers.find("User-Agent") == headers.end()) {
+        headers.emplace("User-Agent", "PinkLib/1.0");
+    }
 
     if (quarantine) {
         headers.emplace("Cookie", "_options=%7B%22pref_quarantine_optin%22%3A%20true%2C%20%22pref_gated_sr_optin%22%3A%20true%7D");
