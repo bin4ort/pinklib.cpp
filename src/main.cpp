@@ -157,6 +157,45 @@ int main(int argc, char* argv[]) {
             pinklib::Preferences::from_cookies(cookies), req_path);
     }));
 
+    // Root page
+    app.at("/", pinklib::RequestHandler([](const std::string&, const std::string& req_path,
+        const std::unordered_map<std::string,std::string>& params, const std::string& query, const std::string&,
+        const std::unordered_map<std::string,std::string>& cookies) -> std::string {
+        return pinklib::subreddit_community(req_path, query, params, cookies);
+    }));
+
+    // Multi-segment routes to catch all the Reddit paths
+    app.at("/r/:sub", pinklib::RequestHandler([](const std::string&, const std::string& req_path,
+        const std::unordered_map<std::string,std::string>& params, const std::string& query, const std::string&,
+        const std::unordered_map<std::string,std::string>& cookies) -> std::string {
+        return pinklib::subreddit_community(req_path, query, params, cookies);
+    }));
+    app.at("/r/:sub/:sort", pinklib::RequestHandler([](const std::string&, const std::string& req_path,
+        const std::unordered_map<std::string,std::string>& params, const std::string& query, const std::string&,
+        const std::unordered_map<std::string,std::string>& cookies) -> std::string {
+        return pinklib::subreddit_community(req_path, query, params, cookies);
+    }));
+    app.at("/user/:name", pinklib::RequestHandler([](const std::string&, const std::string& req_path,
+        const std::unordered_map<std::string,std::string>& params, const std::string& query, const std::string&,
+        const std::unordered_map<std::string,std::string>& cookies) -> std::string {
+        return pinklib::user_profile(req_path, query, params, cookies);
+    }));
+    app.at("/user/:name/:listing", pinklib::RequestHandler([](const std::string&, const std::string& req_path,
+        const std::unordered_map<std::string,std::string>& params, const std::string& query, const std::string&,
+        const std::unordered_map<std::string,std::string>& cookies) -> std::string {
+        return pinklib::user_profile(req_path, query, params, cookies);
+    }));
+    app.at("/comments/:id", pinklib::RequestHandler([](const std::string&, const std::string& req_path,
+        const std::unordered_map<std::string,std::string>& params, const std::string& query, const std::string&,
+        const std::unordered_map<std::string,std::string>& cookies) -> std::string {
+        return pinklib::post_item(req_path, query, params, cookies);
+    }));
+    app.at("/search", pinklib::RequestHandler([](const std::string&, const std::string& req_path,
+        const std::unordered_map<std::string,std::string>& params, const std::string& query, const std::string&,
+        const std::unordered_map<std::string,std::string>& cookies) -> std::string {
+        return pinklib::search_find(req_path, query, params, cookies);
+    }));
+
     // Catch-all for all other routes
     app.at("/:path", pinklib::RequestHandler([](const std::string& method, const std::string& req_path,
         const std::unordered_map<std::string,std::string>& params, const std::string& query, const std::string& body,
