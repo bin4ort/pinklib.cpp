@@ -70,6 +70,7 @@ int main(int argc, char* argv[]) {
     }
 
     pinklib::init_config();
+    pinklib::init_client();
     std::cout << "Starting PinkLib..." << std::endl;
     std::thread([]() { pinklib::init_oauth(); }).detach();
 

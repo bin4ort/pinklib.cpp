@@ -4,6 +4,7 @@
 #include "server.h"
 #include <regex>
 #include <sstream>
+#include <iostream>
 
 namespace pinklib {
 
@@ -149,12 +150,22 @@ std::string subreddit_community(const std::string& path,
     // Fetch posts
     try {
         auto res = reddit_json(api_path, quarantined);
-        auto children = res["data"]["children"];
+        auto& data_node = res["data"];
+        auto children = data_node["children"];
+        std::cerr << "[DEBUG] children is_array: " << children.is_array() << " size: " << children.size() << std::endl;
 
         std::vector<Post> posts;
+        int idx = 0;
         for (const auto& child : children) {
-            posts.push_back(parse_post(child));
+            try {
+                posts.push_back(parse_post(child));
+            } catch (const std::exception& e) {
+                std::cerr << "[DEBUG] parse_post failed for child " << idx << ": " << e.what() << std::endl;
+                throw;
+            }
+            idx++;
         }
+        std::cerr << "[DEBUG] posts size: " << posts.size() << std::endl;
 
         std::string after = res["data"].value("after", "");
 
@@ -235,8 +246,12 @@ std::string subreddit_community(const std::string& path,
         data["all_posts_hidden_nsfw"] = all_nsfw;
         data["no_posts"] = no_posts;
 
-        return build_template("subreddit.html", data);
+        std::cerr << "[DEBUG] About to render template" << std::endl;
+        auto result = build_template("subreddit.html", data);
+        std::cerr << "[DEBUG] Render complete, length: " << result.size() << std::endl;
+        return result;
     } catch (const std::exception& e) {
+        std::cerr << "[DEBUG] Exception in community handler: " << e.what() << std::endl;
         std::string msg = e.what();
         if (msg == "quarantined" || msg == "gated") {
             return quarantine_wall(sub_name, msg, req_url, prefs);

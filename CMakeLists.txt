@@ -42,6 +42,7 @@ FetchContent_MakeAvailable(tomlplusplus)
 # ---- System packages ----
 find_package(OpenSSL REQUIRED)
 find_package(ZLIB REQUIRED)
+find_package(CURL REQUIRED)
 
 # ---- Brotli ----
 FetchContent_Declare(brotli
@@ -102,6 +103,7 @@ target_link_libraries(pinklib PRIVATE
   tomlplusplus::tomlplusplus
   OpenSSL::SSL
   OpenSSL::Crypto
+  CURL::libcurl
   ZLIB::ZLIB
   brotlienc
   brotlidec

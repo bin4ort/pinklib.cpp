@@ -126,35 +126,51 @@ std::tuple<std::string, Media, std::vector<GalleryMedia>> Media::parse(const jso
     const json* url_val = nullptr;
     const json* alt_url_val = nullptr;
 
-    auto data_preview = &data["preview"]["reddit_video_preview"];
-    auto secure_media = &data["secure_media"]["reddit_video"];
-    auto crosspost_parent = &data["crosspost_parent_list"][0]["secure_media"]["reddit_video"];
+    auto get_val = [&](const json& j, const std::string& key) -> const json* {
+        if (j.contains(key) && !j[key].is_null()) return &j[key];
+        return nullptr;
+    };
 
-    if (data_preview->is_string() || (!data_preview->empty() && data_preview->contains("fallback_url"))) {
-        bool is_gif = data_preview->value("is_gif", false);
+    auto get_nested = [&](const json& j, std::initializer_list<const char*> keys) -> const json* {
+        const json* cur = &j;
+        for (auto k : keys) {
+            if (!cur->contains(k) || (*cur)[k].is_null()) return nullptr;
+            cur = &(*cur)[k];
+        }
+        return cur;
+    };
+
+    auto preview_video = get_nested(data, {"preview", "reddit_video_preview"});
+    auto secure_video = get_nested(data, {"secure_media", "reddit_video"});
+    auto crosspost_video = data.contains("crosspost_parent_list") && data["crosspost_parent_list"].is_array() && !data["crosspost_parent_list"].empty()
+        ? get_nested(data["crosspost_parent_list"][0], {"secure_media", "reddit_video"}) : nullptr;
+
+    if (preview_video && !preview_video->empty() && preview_video->contains("fallback_url")) {
+        bool is_gif = preview_video->value("is_gif", false);
         post_type = is_gif ? "gif" : "video";
-        url_val = &(*data_preview)["fallback_url"];
-        if (data_preview->contains("hls_url")) alt_url_val = &(*data_preview)["hls_url"];
-    } else if (secure_media->is_object() && secure_media->contains("fallback_url")) {
-        bool is_gif = secure_media->value("is_gif", false);
+        url_val = &(*preview_video)["fallback_url"];
+        if (preview_video->contains("hls_url")) alt_url_val = &(*preview_video)["hls_url"];
+    } else if (secure_video && secure_video->is_object() && secure_video->contains("fallback_url")) {
+        bool is_gif = secure_video->value("is_gif", false);
         post_type = is_gif ? "gif" : "video";
-        url_val = &(*secure_media)["fallback_url"];
-        if (secure_media->contains("hls_url")) alt_url_val = &(*secure_media)["hls_url"];
-    } else if (crosspost_parent->is_object() && crosspost_parent->contains("fallback_url")) {
-        bool is_gif = crosspost_parent->value("is_gif", false);
+        url_val = &(*secure_video)["fallback_url"];
+        if (secure_video->contains("hls_url")) alt_url_val = &(*secure_video)["hls_url"];
+    } else if (crosspost_video && crosspost_video->is_object() && crosspost_video->contains("fallback_url")) {
+        bool is_gif = crosspost_video->value("is_gif", false);
         post_type = is_gif ? "gif" : "video";
-        url_val = &(*crosspost_parent)["fallback_url"];
-        if (crosspost_parent->contains("hls_url")) alt_url_val = &(*crosspost_parent)["hls_url"];
+        url_val = &(*crosspost_video)["fallback_url"];
+        if (crosspost_video->contains("hls_url")) alt_url_val = &(*crosspost_video)["hls_url"];
     } else if (data.value("post_hint", "") == "image") {
-        auto& preview = data["preview"]["images"][0];
-        auto& mp4 = preview["variants"]["mp4"];
-        if (mp4.is_object()) {
+        auto preview_img = get_nested(data, {"preview", "images", "0"});
+        auto mp4 = preview_img ? get_nested(*preview_img, {"variants", "mp4"}) : nullptr;
+        if (mp4 && mp4->is_object()) {
             post_type = "gif";
-            url_val = &mp4["source"]["url"];
+            url_val = &(*mp4)["source"]["url"];
         } else {
             post_type = "image";
             if (data.value("domain", "") == "i.redd.it") url_val = &data["url"];
-            else url_val = &preview["source"]["url"];
+            else if (preview_img) url_val = &(*preview_img)["source"]["url"];
+            else url_val = &data["url"];
         }
     } else if (data.value("is_self", false)) {
         post_type = "self";
@@ -179,7 +195,10 @@ std::tuple<std::string, Media, std::vector<GalleryMedia>> Media::parse(const jso
         url_val = &data["url"];
     }
 
-    auto& source = data["preview"]["images"][0]["source"];
+    auto* source_img = get_nested(data, {"preview", "images", "0", "source"});
+    int64_t w = source_img ? source_img->value("width", 0) : 0;
+    int64_t h = source_img ? source_img->value("height", 0) : 0;
+    std::string poster_url = source_img ? format_url(source_img->value("url", "")) : "";
     std::string alt_url = (alt_url_val && alt_url_val->is_string()) ?
         format_url(alt_url_val->get<std::string>()) : "";
 
@@ -197,9 +216,9 @@ std::tuple<std::string, Media, std::vector<GalleryMedia>> Media::parse(const jso
     Media media{
         url,
         alt_url,
-        source.value("width", 0),
-        source.value("height", 0),
-        format_url(source.value("url", "")),
+        w,
+        h,
+        poster_url,
         download_name
     };
 
@@ -644,6 +663,7 @@ void filter_posts(std::vector<Post>& posts,
 // ---- parse_post ----
 Post parse_post(const json& post) {
     auto& data = post["data"];
+    try {
     auto [rel_time, created] = time_str(data.value("created_utc", 0.0));
     int64_t score = data.value("score", 0);
     double ratio = data.value("upvote_ratio", 1.0) * 100.0;
@@ -716,6 +736,12 @@ Post parse_post(const json& post) {
         p.out_url = data["url_overridden_by_dest"].get<std::string>();
 
     return p;
+    } catch (const std::exception& e) {
+        std::cerr << "[DEBUG] parse_post inner error: " << e.what() << " | post data keys: ";
+        for (auto& [k, v] : data.items()) std::cerr << k << " ";
+        std::cerr << std::endl;
+        throw;
+    }
 }
 
 // ---- deflate ----

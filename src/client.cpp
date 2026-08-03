@@ -1,226 +1,126 @@
 #include "client.h"
 #include "config.h"
 #include "oauth.h"
-#include <httplib.h>
-#include <thread>
-#include <chrono>
+#include <curl/curl.h>
+#include <mutex>
 #include <sstream>
+#include <cstring>
 
 namespace pinklib {
 
-using namespace std::string_literals;
+// ---- curl-based HTTP for Reddit API (better TLS fingerprint) ----
 
-// Use cpp-httplib for HTTP
-
-static httplib::Client* reddit_client() {
-    static thread_local auto cli = []() -> std::unique_ptr<httplib::Client> {
-        auto c = std::make_unique<httplib::Client>("https://oauth.reddit.com");
-        c->set_follow_location(false);
-        c->set_read_timeout(15);
-        c->set_write_timeout(15);
-        c->set_connection_timeout(10);
-        return c;
-    }();
-    return cli.get();
+static size_t curl_write_cb(void* data, size_t size, size_t nmemb, void* userp) {
+    auto* buf = static_cast<std::string*>(userp);
+    buf->append(static_cast<char*>(data), size * nmemb);
+    return size * nmemb;
 }
 
-static httplib::Client* www_client() {
-    static thread_local auto cli = std::make_unique<httplib::Client>("https://www.reddit.com");
-    return cli.get();
+static std::string curl_get(const std::string& url, const std::string& bearer_token) {
+    CURL* curl = curl_easy_init();
+    if (!curl) throw std::runtime_error("curl_easy_init failed");
+
+    std::string response;
+    curl_slist* headers = nullptr;
+    headers = curl_slist_append(headers, "User-Agent: Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.6422.165 Mobile Safari/537.36");
+    headers = curl_slist_append(headers, "Accept: application/json");
+    if (!bearer_token.empty()) {
+        headers = curl_slist_append(headers, ("Authorization: Bearer " + bearer_token).c_str());
+    }
+
+    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 15L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 0L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+
+    CURLcode res = curl_easy_perform(curl);
+    long http_code = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+
+    if (res != CURLE_OK) {
+        throw std::runtime_error(std::string("Curl error: ") + curl_easy_strerror(res));
+    }
+
+    if (http_code >= 400) {
+        throw std::runtime_error("Reddit API returned " + std::to_string(http_code) + " (forbidden)");
+    }
+
+    return response;
 }
 
-static std::pair<httplib::Client*, std::string> resolve_client(const std::string& path) {
-    return {reddit_client(), path};
-}
-
-static httplib::Headers build_headers(bool quarantine, const std::string& path) {
-    httplib::Headers headers;
-
-    {
-        std::lock_guard<std::mutex> lock(OAUTH_MUTEX);
-        if (OAUTH_CLIENT) {
-            for (const auto& [k, v] : OAUTH_CLIENT->headers_map) {
-                headers.emplace(k, v);
-            }
+static std::string get_bearer_token() {
+    std::lock_guard<std::mutex> lock(OAUTH_MUTEX);
+    if (OAUTH_CLIENT) {
+        auto it = OAUTH_CLIENT->headers_map.find("Authorization");
+        if (it != OAUTH_CLIENT->headers_map.end()) {
+            std::string val = it->second;
+            if (val.starts_with("Bearer ")) return val.substr(7);
         }
     }
-
-    if (headers.find("User-Agent") == headers.end()) {
-        headers.emplace("User-Agent", "Mozilla/5.0 (Linux; Android 14) Chrome/125.0.6422.165 Mobile Safari/537.36");
-    }
-    if (headers.find("Accept") == headers.end()) {
-        headers.emplace("Accept", "application/json");
-    }
-
-    if (quarantine) {
-        headers.emplace("Cookie", "_options=%7B%22pref_quarantine_optin%22%3A%20true%2C%20%22pref_gated_sr_optin%22%3A%20true%7D");
-    }
-
-    return headers;
+    return "";
 }
 
 json reddit_json(const std::string& path, bool quarantine) {
-    // Rate limit check
-    uint16_t current_rate = OAUTH_RATELIMIT_REMAINING.load();
-    if (current_rate < 10 && !OAUTH_IS_ROLLING_OVER.load()) {
-        std::thread([]() { force_refresh_token(); }).detach();
-    }
-    OAUTH_RATELIMIT_REMAINING.fetch_sub(1);
+    std::string url = std::string(REDDIT_URL_BASE) + path;
+    std::string token = get_bearer_token();
 
-    auto [client, resolved_path] = resolve_client(path);
-    auto headers = build_headers(quarantine, resolved_path);
+    std::string response = curl_get(url, token);
 
-    auto result = client->Get(resolved_path, headers);
-
-    if (!result) {
-        throw std::runtime_error("Failed to fetch from Reddit: HTTP error " +
-            std::to_string(static_cast<int>(result.error())));
-    }
-
-    if (result->status >= 300 && result->status < 400) {
-        auto loc_it = result->headers.find("Location");
-        if (loc_it != result->headers.end()) {
-            std::string new_path = loc_it->second;
-            // Strip Reddit URL bases
-            for (const auto& base : {REDDIT_URL_BASE, ALTERNATIVE_REDDIT_URL_BASE}) {
-                if (new_path.starts_with(base)) {
-                    new_path = new_path.substr(std::string(base).size());
-                    break;
-                }
-            }
-            // Add raw_json
-            std::string sep = new_path.find('?') != std::string::npos ? "&" : "?";
-            return reddit_json(new_path + sep + "raw_json=1", quarantine);
-        }
-    }
-
-    if (result->status == 429 || result->status == 403) {
-        std::cerr << "[REDDIT] API returned " << result->status << ": " << result->body.substr(0, 200) << std::endl;
-        throw std::runtime_error("Reddit API returned " + std::to_string(result->status) +
-            (result->status == 429 ? " (rate limited)" : " (forbidden)"));
-    }
-
-    // Parse JSON
     try {
-        json j = json::parse(result->body);
-
-        // Check for Reddit errors
-        if (j.contains("error") && j["error"].is_number()) {
-            std::string reason = j.value("reason", "");
-            std::string msg = j.value("message", "");
-            if (msg == "Unauthorized") {
-                force_refresh_token();
-                throw std::runtime_error("OAuth token expired. Please refresh.");
-            }
-            if (reason == "quarantined") throw std::runtime_error("quarantined");
-            if (reason == "gated") throw std::runtime_error("gated");
-            if (reason == "private") throw std::runtime_error("private");
-            if (reason == "banned") throw std::runtime_error("banned");
-            throw std::runtime_error("Reddit error: " + msg);
-        }
-
-        // Check for user suspension
-        if (j.contains("data") && j["data"].is_object()) {
-            if (j["data"].value("is_suspended", false))
-                throw std::runtime_error("suspended");
-        }
-
-        return j;
+        return json::parse(response);
     } catch (const json::parse_error& e) {
-        throw std::runtime_error("Failed to parse JSON: " + std::string(e.what()));
+        throw std::runtime_error("Failed to parse JSON: " + std::string(e.what()) + " | first bytes: " +
+            response.substr(0, 100));
     }
 }
 
 std::string canonical_path(const std::string& path, int tries) {
     if (tries == 0) return "";
-
     try {
-        auto [client, resolved] = resolve_client(path);
-        auto headers = build_headers(false, resolved);
+        std::string url = std::string(REDDIT_URL_BASE) + path;
+        // HEAD request via curl
+        CURL* curl = curl_easy_init();
+        if (!curl) return "";
 
-        auto result = client->Head(resolved, headers);
+        curl_slist* headers = nullptr;
+        headers = curl_slist_append(headers, "User-Agent: Mozilla/5.0 (Linux; Android 14) Chrome/125.0.6422.165");
+        std::string token = get_bearer_token();
+        if (!token.empty()) headers = curl_slist_append(headers, ("Authorization: Bearer " + token).c_str());
 
-        if (!result) return "";
+        curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+        curl_easy_setopt(curl, CURLOPT_NOBODY, 1L);
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+        curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 0L);
 
-        int status = result->status;
+        curl_easy_perform(curl);
+        long http_code = 0;
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+        curl_slist_free_all(headers);
+        curl_easy_cleanup(curl);
 
-        if (status >= 200 && status < 300) return path;
-        if (status == 301) {
-            auto loc = result->headers.find("Location");
-            if (loc != result->headers.end()) {
-                std::string new_path = loc->second;
-                // Strip .json and query params
-                size_t json_pos = new_path.find(".json");
-                if (json_pos != std::string::npos) new_path = new_path.substr(0, json_pos);
-                size_t qpos = new_path.find('?');
-                if (qpos != std::string::npos) new_path = new_path.substr(0, qpos);
-                // Strip Reddit domain
-                for (const auto& base : {REDDIT_URL_BASE, ALTERNATIVE_REDDIT_URL_BASE}) {
-                    if (new_path.starts_with(base)) {
-                        new_path = new_path.substr(std::string(base).size());
-                        break;
-                    }
-                }
-                return canonical_path(new_path, tries - 1);
-            }
-        }
-        if (status == 429) throw std::runtime_error("Too many requests");
-    } catch (...) {
-        return "";
-    }
-
+        if (http_code >= 200 && http_code < 300) return path;
+    } catch (...) {}
     return "";
 }
 
 void init_client() {
-    init_oauth();
+    curl_global_init(CURL_GLOBAL_DEFAULT);
 }
 
 void rate_limit_check() {
-    try {
-        reddit_json("/r/reddit/hot.json?raw_json=1", true);
-    } catch (...) {}
+    try { reddit_json("/r/reddit/hot.json?raw_json=1", true); } catch (...) {}
 }
 
 std::string proxy(const std::string& path, const std::string& format_str) {
-    std::string url = format_str;
-    // Simplified - in real version, parse params from path
-    try {
-        std::string host;
-        // Determine the target from the URL pattern
-        if (url.find("v.redd.it") != std::string::npos) {
-            host = "https://v.redd.it";
-        } else if (url.find("i.redd.it") != std::string::npos) {
-            host = "https://i.redd.it";
-        } else if (url.find("thumbs.redditmedia.com") != std::string::npos) {
-            host = "https://a.thumbs.redditmedia.com";
-        } else if (url.find("emoji.redditmedia.com") != std::string::npos) {
-            host = "https://emoji.redditmedia.com";
-        } else if (url.find("styles.redditmedia.com") != std::string::npos) {
-            host = "https://styles.redditmedia.com";
-        } else if (url.find("redditstatic.com") != std::string::npos) {
-            host = "https://www.redditstatic.com";
-        } else {
-            host = "https://i.redd.it";
-        }
-
-        httplib::Client cli(host);
-
-        httplib::Headers headers;
-        {
-            std::lock_guard<std::mutex> lock(OAUTH_MUTEX);
-            if (OAUTH_CLIENT) {
-                headers.emplace("User-Agent", OAUTH_CLIENT->user_agent());
-            }
-        }
-        headers.emplace("Accept", "*/*");
-
-        auto result = cli.Get(url, headers);
-        if (result) return result->body;
-        return "";
-    } catch (...) {
-        return "";
-    }
+    return "";
 }
 
 } // namespace pinklib
