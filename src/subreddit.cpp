@@ -155,15 +155,12 @@ std::string subreddit_community(const std::string& path,
         std::cerr << "[DEBUG] children is_array: " << children.is_array() << " size: " << children.size() << std::endl;
 
         std::vector<Post> posts;
-        int idx = 0;
         for (const auto& child : children) {
             try {
                 posts.push_back(parse_post(child));
             } catch (const std::exception& e) {
-                std::cerr << "[DEBUG] parse_post failed for child " << idx << ": " << e.what() << std::endl;
-                throw;
+                std::cerr << "[WARN] Skipping post: " << e.what() << std::endl;
             }
-            idx++;
         }
         std::cerr << "[DEBUG] posts size: " << posts.size() << std::endl;
 
