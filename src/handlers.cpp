@@ -365,29 +365,118 @@ std::string settings_get(const std::string& path,
                           const std::unordered_map<std::string, std::string>& cookies) {
     Preferences prefs = Preferences::from_cookies(cookies);
 
-    json data;
-    data["prefs"] = prefs.to_json();
-    data["prefs"]["theme"] = prefs.theme;
-    data["prefs"]["front_page"] = prefs.front_page;
-    data["prefs"]["layout"] = prefs.layout;
-    data["prefs"]["wide"] = prefs.wide;
-    data["prefs"]["blur_spoiler"] = prefs.blur_spoiler;
-    data["prefs"]["show_nsfw"] = prefs.show_nsfw;
-    data["prefs"]["blur_nsfw"] = prefs.blur_nsfw;
-    data["prefs"]["use_hls"] = prefs.use_hls;
-    data["prefs"]["hide_hls_notification"] = prefs.hide_hls_notification;
-    data["prefs"]["autoplay_videos"] = prefs.autoplay_videos;
-    data["prefs"]["comment_sort"] = prefs.comment_sort;
-    data["prefs"]["post_sort"] = prefs.post_sort;
-    data["prefs"]["hide_awards"] = prefs.hide_awards;
-    data["prefs"]["hide_score"] = prefs.hide_score;
-    data["prefs"]["available_themes"] = prefs.available_themes;
-    data["prefs"]["subscriptions"] = prefs.subscriptions;
-    data["prefs"]["filters"] = prefs.filters;
-    data["prefs"]["fixed_navbar"] = prefs.fixed_navbar;
-    data["url"] = path;
+    // Build settings page directly - bypass complex template rendering
+    std::stringstream html;
+    html << "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n";
+    html << "<meta charset=\"UTF-8\">\n";
+    html << "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n";
+    html << "<title>PinkLib Settings</title>\n";
+    html << "<link rel=\"stylesheet\" type=\"text/css\" href=\"/style.css\">\n";
+    html << "<link rel=\"shortcut icon\" type=\"image/x-icon\" href=\"/favicon.ico\">\n";
+    html << "</head>\n<body>\n";
 
-    return render_template("settings.html", data);
+    html << "<nav><div id=\"logo\">";
+    html << "<a id=\"pinklib\" href=\"/\"><span id=\"pink\">pink</span><span id=\"lib\">lib.</span></a>";
+    html << "</div>";
+    html << "<div id=\"links\">";
+    html << "<a href=\"https://www.reddit.com\">reddit</a>";
+    html << "<a href=\"/settings\">settings</a>";
+    html << "</div></nav>\n";
+
+    html << "<main><div id=\"settings\">\n";
+    html << "<h1>Settings</h1>\n";
+    html << "<form method=\"POST\" action=\"/settings\">\n";
+
+    // Theme select
+    html << "<div class=\"preference\"><label for=\"theme\">Theme:</label>\n";
+    html << "<select name=\"theme\" id=\"theme\">\n";
+    for (const auto& t : prefs.available_themes) {
+        html << "<option value=\"" << t << "\"";
+        if (t == prefs.theme) html << " selected";
+        html << ">" << t << "</option>\n";
+    }
+    html << "</select></div>\n";
+
+    // Front page
+    html << "<div class=\"preference\"><label for=\"front_page\">Front page:</label>\n";
+    html << "<select name=\"front_page\" id=\"front_page\">\n";
+    for (const auto& v : {"default", "popular", "all"}) {
+        html << "<option value=\"" << v << "\"";
+        if (v == prefs.front_page) html << " selected";
+        html << ">" << v << "</option>\n";
+    }
+    html << "</select></div>\n";
+
+    // Layout
+    html << "<div class=\"preference\"><label for=\"layout\">Layout:</label>\n";
+    html << "<select name=\"layout\" id=\"layout\">\n";
+    for (const auto& v : {"card", "clean", "compact"}) {
+        html << "<option value=\"" << v << "\"";
+        if (v == prefs.layout) html << " selected";
+        html << ">" << v << "</option>\n";
+    }
+    html << "</select></div>\n";
+
+    // Checkbox preferences
+    auto checkbox = [&](const std::string& name, const std::string& label, const std::string& value) {
+        html << "<div class=\"preference\"><label>";
+        html << "<input type=\"checkbox\" name=\"" << name << "\" value=\"on\"";
+        if (value == "on") html << " checked";
+        html << "> " << label << "</label></div>\n";
+    };
+    checkbox("wide", "Wide layout", prefs.wide);
+    checkbox("show_nsfw", "Show NSFW posts", prefs.show_nsfw);
+    checkbox("blur_nsfw", "Blur NSFW previews", prefs.blur_nsfw);
+    checkbox("blur_spoiler", "Blur spoilers", prefs.blur_spoiler);
+    checkbox("use_hls", "Use HLS for videos", prefs.use_hls);
+    checkbox("hide_hls_notification", "Hide HLS notification", prefs.hide_hls_notification);
+    checkbox("autoplay_videos", "Autoplay videos", prefs.autoplay_videos);
+    checkbox("hide_awards", "Hide awards", prefs.hide_awards);
+    checkbox("hide_score", "Hide scores", prefs.hide_score);
+    checkbox("fixed_navbar", "Fixed navbar", prefs.fixed_navbar);
+    checkbox("disable_visit_reddit_confirmation", "Disable Reddit redirect confirmation", prefs.disable_visit_reddit_confirmation);
+    checkbox("remove_default_feeds", "Remove default feeds", prefs.remove_default_feeds);
+
+    // Comment sort
+    html << "<div class=\"preference\"><label for=\"comment_sort\">Default comment sort:</label>\n";
+    html << "<select name=\"comment_sort\" id=\"comment_sort\">\n";
+    for (const auto& v : {"confidence", "top", "new", "controversial", "old", "qa"}) {
+        html << "<option value=\"" << v << "\"";
+        if (v == prefs.comment_sort) html << " selected";
+        html << ">" << v << "</option>\n";
+    }
+    html << "</select></div>\n";
+
+    // Post sort
+    html << "<div class=\"preference\"><label for=\"post_sort\">Default post sort:</label>\n";
+    html << "<select name=\"post_sort\" id=\"post_sort\">\n";
+    for (const auto& v : {"hot", "new", "top", "rising", "controversial"}) {
+        html << "<option value=\"" << v << "\"";
+        if (v == prefs.post_sort) html << " selected";
+        html << ">" << v << "</option>\n";
+    }
+    html << "</select></div>\n";
+
+    // Video quality
+    html << "<div class=\"preference\"><label for=\"video_quality\">Video quality:</label>\n";
+    html << "<select name=\"video_quality\" id=\"video_quality\">\n";
+    for (const auto& v : {"1080", "720", "480", "360", "240"}) {
+        html << "<option value=\"" << v << "\"";
+        if (v == prefs.video_quality) html << " selected";
+        html << ">" << v << "</option>\n";
+    }
+    html << "</select></div>\n";
+
+    html << "<button type=\"submit\">Save settings</button>\n";
+    html << "</form>\n";
+
+    html << "<p><a href=\"/settings/restore?redirect=/\">Restore default settings</a></p>\n";
+
+    html << "</div></main>\n";
+    html << "<footer><p>v0.36.0 &bull; <a href=\"/info\">Instance info</a></p></footer>\n";
+    html << "</body>\n</html>";
+
+    return html.str();
 }
 
 std::string settings_set(const std::string& path,

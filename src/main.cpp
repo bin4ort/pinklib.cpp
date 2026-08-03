@@ -114,17 +114,57 @@ int main(int argc, char* argv[]) {
         return (d && *d == "on") ? "User-agent: *\nDisallow: /\n" : "User-agent: *\nDisallow: /u/\nDisallow: /user/\n";
     });
 
-    // Core routes as simple handlers
-    app.at("/*", [](const std::string& method, const std::string& req_path,
-        const std::unordered_map<std::string, std::string>& params,
-        const std::string& query, const std::string& body,
-        const std::unordered_map<std::string, std::string>& cookies) -> std::string {
+    // Core routes as explicit handler with proper types
+    std::string method, req_path, query, body;
+    std::unordered_map<std::string, std::string> params, cookies;
+
+    // Static assets first
+    app.at("/style.css", pinklib::RequestHandler([](const std::string&, const std::string&,
+        const std::unordered_map<std::string,std::string>&, const std::string&, const std::string&,
+        const std::unordered_map<std::string,std::string>&) -> std::string {
+        return serve_static("/style.css");
+    }));
+    app.at("/favicon.ico", pinklib::RequestHandler([](const std::string&, const std::string&,
+        const std::unordered_map<std::string,std::string>&, const std::string&, const std::string&,
+        const std::unordered_map<std::string,std::string>&) -> std::string {
+        return serve_static("/favicon.ico");
+    }));
+    app.at("/robots.txt", pinklib::RequestHandler([](const std::string&, const std::string&,
+        const std::unordered_map<std::string,std::string>&, const std::string&, const std::string&,
+        const std::unordered_map<std::string,std::string>&) -> std::string {
+        return "User-agent: *\nDisallow: /u/\nDisallow: /user/\n";
+    }));
+
+    // Explicit page routes
+    app.get("/settings", pinklib::RequestHandler([](const std::string& method, const std::string& req_path,
+        const std::unordered_map<std::string,std::string>& params, const std::string& query, const std::string& body,
+        const std::unordered_map<std::string,std::string>& cookies) -> std::string {
+        if (method == "POST") {
+            std::unordered_map<std::string,std::string> set_cookies;
+            return pinklib::settings_set(req_path, query, body, params, cookies, set_cookies);
+        }
+        return pinklib::settings_get(req_path, query, params, cookies);
+    }));
+    app.get("/info", pinklib::RequestHandler([](const std::string&, const std::string& req_path,
+        const std::unordered_map<std::string,std::string>& params, const std::string& query, const std::string&,
+        const std::unordered_map<std::string,std::string>& cookies) -> std::string {
+        return pinklib::instance_info_page(req_path, query, params, cookies);
+    }));
+    app.get("/about", pinklib::RequestHandler([](const std::string&, const std::string& req_path,
+        const std::unordered_map<std::string,std::string>&, const std::string&, const std::string&,
+        const std::unordered_map<std::string,std::string>& cookies) -> std::string {
+        return pinklib::error_response("About pages aren't added yet",
+            pinklib::Preferences::from_cookies(cookies), req_path);
+    }));
+
+    // Catch-all for all other routes
+    app.at("/:path", pinklib::RequestHandler([](const std::string& method, const std::string& req_path,
+        const std::unordered_map<std::string,std::string>& params, const std::string& query, const std::string& body,
+        const std::unordered_map<std::string,std::string>& cookies) -> std::string {
 
     // Dispatch based on path patterns
-    if (req_path == "/" || req_path == "/best" || req_path == "/hot" || req_path == "/new" ||
-        req_path == "/top" || req_path == "/rising" || req_path == "/controversial") {
-        return pinklib::subreddit_community(req_path, query, params, cookies);
-    }
+    std::string p = req_path;
+    if (p.starts_with("/")) p = p.substr(1);
 
     // r/ routes
     if (req_path.starts_with("/r/")) {
@@ -236,7 +276,7 @@ int main(int argc, char* argv[]) {
     // 404
     return pinklib::error_response("Nothing here",
         pinklib::Preferences::from_cookies(cookies), req_path);
-    });
+    }));
 
     app.listen(listener, std::stoi(port));
     return 0;

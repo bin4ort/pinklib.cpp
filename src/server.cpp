@@ -146,42 +146,9 @@ void Server::listen(const std::string& address, int port) {
                     return;
                 }
 
-                // Determine content type from response
                 std::string content_type = content_type_for(req.path);
-
-                // Brotli compression
-                auto accept_enc = req.get_header_value("Accept-Encoding");
-                if (!accept_enc.empty() && body.size() > 1452) {
-                    if (accept_enc.find("br") != std::string::npos) {
-                        std::string compressed = compress_brotli(body);
-                        if (!compressed.empty()) {
-                            res.set_header("Content-Encoding", "br");
-                            body = compressed;
-                        }
-                    } else if (accept_enc.find("gzip") != std::string::npos) {
-                        std::string compressed = compress_gzip(body);
-                        if (!compressed.empty()) {
-                            res.set_header("Content-Encoding", "gzip");
-                            body = compressed;
-                        }
-                    }
-                }
-
                 res.status = 200;
                 res.set_content(body, content_type.c_str());
-
-                // Apply default headers
-                for (const auto& [key, val] : default_headers) {
-                    res.set_header(key.c_str(), val.c_str());
-                }
-
-                // CSP
-                res.set_header("Content-Security-Policy",
-                    "default-src 'none'; font-src 'self'; script-src 'self' blob:; "
-                    "manifest-src 'self'; media-src 'self' data: blob: about:; "
-                    "style-src 'self' 'unsafe-inline'; base-uri 'none'; "
-                    "img-src 'self' data:; form-action 'self'; frame-ancestors 'none'; "
-                    "connect-src 'self'; worker-src blob:;");
             });
         } else if (route.method == "POST") {
             svr.Post(pattern, [this, route, pattern](const httplib::Request& req, httplib::Response& res) {
@@ -204,13 +171,12 @@ void Server::listen(const std::string& address, int port) {
 
                 res.status = 200;
                 res.set_content(body, "text/html; charset=utf-8");
-
-                for (const auto& [key, val] : default_headers) {
-                    res.set_header(key.c_str(), val.c_str());
-                }
             });
         }
     }
+
+    // Handle unmatched routes using the last registered (catch-all) route
+    svr.set_mount_point("/", "");  // serve static
 
     std::cout << "Running PinkLib v0.36.0 on " << address << ":" << port << "!" << std::endl;
     svr.listen(address.c_str(), port);
@@ -223,30 +189,65 @@ std::string redirect(const std::string& path) {
 }
 
 std::string error_response(const std::string& msg, const Preferences& prefs, const std::string& url) {
-    json data;
-    data["msg"] = msg;
-    data["url"] = url;
-    data["prefs"] = prefs.to_json();
-    return render_template("error.html", data);
+    std::stringstream html;
+    html << "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n";
+    html << "<meta charset=\"UTF-8\">\n";
+    html << "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n";
+    html << "<title>Error - PinkLib</title>\n";
+    html << "<link rel=\"stylesheet\" type=\"text/css\" href=\"/style.css\">\n";
+    html << "</head>\n<body>\n";
+    html << "<nav><div id=\"logo\">";
+    html << "<a id=\"pinklib\" href=\"/\"><span id=\"pink\">pink</span><span id=\"lib\">lib.</span></a>";
+    html << "</div></nav>\n";
+    html << "<main><div id=\"error\">\n";
+    html << "<h1>Error</h1>\n";
+    html << "<p>" << msg << "</p>\n";
+    html << "<p><a href=\"/\">Head back home?</a></p>\n";
+    html << "</div></main>\n";
+    html << "</body>\n</html>";
+    return html.str();
 }
 
 std::string info_response(const std::string& msg, const Preferences& prefs, const std::string& url) {
-    json data;
-    data["msg"] = msg;
-    data["url"] = url;
-    data["prefs"] = prefs.to_json();
-    return render_template("info.html", data);
+    std::stringstream html;
+    html << "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n";
+    html << "<meta charset=\"UTF-8\">\n";
+    html << "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n";
+    html << "<title>Info - PinkLib</title>\n";
+    html << "<link rel=\"stylesheet\" type=\"text/css\" href=\"/style.css\">\n";
+    html << "</head>\n<body>\n";
+    html << "<nav><div id=\"logo\">";
+    html << "<a id=\"pinklib\" href=\"/\"><span id=\"pink\">pink</span><span id=\"lib\">lib.</span></a>";
+    html << "</div>";
+    html << "<div id=\"links\"><a href=\"/settings\">settings</a></div></nav>\n";
+    html << "<main><div id=\"info\">\n";
+    html << "<h1>" << msg << "</h1>\n";
+    html << "<p>PinkLib v0.36.0</p>\n";
+    html << "<p><a href=\"/\">Home</a></p>\n";
+    html << "</div></main>\n";
+    html << "</body>\n</html>";
+    return html.str();
 }
 
 std::string nsfw_landing_response(const std::string& res, ResourceType res_type,
                                    const Preferences& prefs, const std::string& url) {
-    json data;
-    data["res"] = res;
-    data["res_type"] = (res_type == ResourceType::Subreddit) ? "Subreddit" :
-                        (res_type == ResourceType::User) ? "User" : "Post";
-    data["url"] = url;
-    data["prefs"] = prefs.to_json();
-    return render_template("nsfwlanding.html", data);
+    std::stringstream html;
+    html << "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n";
+    html << "<meta charset=\"UTF-8\">\n";
+    html << "<title>NSFW - PinkLib</title>\n";
+    html << "<link rel=\"stylesheet\" type=\"text/css\" href=\"/style.css\">\n";
+    html << "</head>\n<body>\n";
+    html << "<nav><div id=\"logo\">";
+    html << "<a id=\"pinklib\" href=\"/\"><span id=\"pink\">pink</span><span id=\"lib\">lib.</span></a>";
+    html << "</div></nav>\n";
+    html << "<main><div id=\"nsfw\">\n";
+    html << "<h1>NSFW Content</h1>\n";
+    html << "<p>This content is marked NSFW. ";
+    html << "Enable \"Show NSFW posts\" in <a href=\"/settings\">settings</a> to view.</p>\n";
+    html << "<p><a href=\"/\">Home</a></p>\n";
+    html << "</div></main>\n";
+    html << "</body>\n</html>";
+    return html.str();
 }
 
 } // namespace pinklib
